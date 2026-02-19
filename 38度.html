@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>JSA Border Cross - Mobile Ready</title>
+    
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+    <link rel="apple-touch-icon" href="icon.png">
+
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#000000">
+
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Arial Black', sans-serif; touch-action: none; }
+        #game-ui { position: absolute; top: 20px; left: 20px; color: #fff; z-index: 100; pointer-events: none; display: none; }
+        .bar-container { width: 250px; height: 12px; border: 2px solid #fff; background: #222; margin-top: 5px; position: relative; }
+        #health-fill { width: 100%; height: 100%; background: #f00; transition: width 0.2s; }
+        #energy-fill { width: 100%; height: 100%; background: #00bfff; }
+        .label { font-size: 10px; letter-spacing: 1px; margin-top: 10px; text-shadow: 1px 1px #000; }
+        #status-msg { position: absolute; top: 20px; right: 20px; color: #ff0; font-size: 18px; text-shadow: 2px 2px #000; }
+        #crosshair { position: absolute; top: 50%; left: 50%; width: 12px; height: 12px; border: 1px solid rgba(255,255,255,0.8); border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none; display: none; }
+        
+        #menu-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 300; color: white; }
+        .menu-btn { width: 300px; padding: 20px; margin: 10px; font-size: 20px; cursor: pointer; border: 2px solid #fff; background: transparent; color: white; transition: 0.3s; }
+        .menu-btn:hover { background: white; color: black; }
+        #hard-btn { border-color: #f00; color: #f00; }
+        #hard-btn:hover { background: #f00; color: white; }
+
+        #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; z-index: 200; pointer-events: none; }
+        #msg { color: #fff; font-size: 32px; display: none; text-align: center; background: rgba(0,0,0,0.8); padding: 20px; border: 4px solid #f00; pointer-events: auto; }
+        #instructions { position: absolute; bottom: 20px; width: 100%; text-align: center; color: white; font-size: 14px; text-shadow: 1px 1px 2px black; display: none; }
+        #flash { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #ffaa00; opacity: 0; pointer-events: none; z-index: 500; }
+
+        /* --- モバイル対応用スタイル --- */
+        #mode-switch { position: absolute; top: 20px; right: 20px; z-index: 400; padding: 10px; background: rgba(255,255,255,0.2); color: #fff; border: 1px solid #fff; cursor: pointer; font-size: 12px; }
+        #mobile-controls { position: absolute; bottom: 30px; left: 30px; width: 120px; height: 120px; background: rgba(255,255,255,0.1); border-radius: 50%; z-index: 150; display: none; touch-action: none; border: 2px solid rgba(255,255,255,0.3); }
+        #joystick { position: absolute; top: 35px; left: 35px; width: 50px; height: 50px; background: #fff; border-radius: 50%; opacity: 0.5; pointer-events: none; }
+        #mobile-buttons { position: absolute; bottom: 30px; right: 30px; z-index: 150; display: none; flex-direction: column; gap: 10px; }
+        .touch-btn { width: 70px; height: 70px; background: rgba(255,255,255,0.2); border: 2px solid #fff; border-radius: 50%; color: #fff; font-weight: bold; display: flex; align-items: center; justify-content: center; user-select: none; }
+    </style>
+</head>
+<body>
+
+<div id="flash"></div>
+
+<button id="mode-switch">DEVICE: PC</button>
+
+<div id="mobile-controls"><div id="joystick"></div></div>
+<div id="mobile-buttons">
+    <div class="touch-btn" id="btn-dash">DASH</div>
+    <div class="touch-btn" id="btn-jump">JUMP</div>
+</div>
+
+<div id="menu-overlay">
+    <h1 style="letter-spacing: 10px;">JSA ESCAPE</h1>
+    <button class="menu-btn" id="normal-btn">NORMAL MODE<br><span style="font-size: 12px;">Truck & Money Bag available</span></button>
+    <button class="menu-btn" id="hard-btn">ゲキムズモード<br><span style="font-size: 12px;">ULTRA Fast Bullets / High Rate of Fire</span></button>
+</div>
+
+<div id="game-ui">
+    <div class="label">VITAL SIGNS / ARMOR</div>
+    <div class="bar-container"><div id="health-fill"></div></div>
+    <div class="label" id="energy-label">ENERGY (SPACE TO DASH)</div>
+    <div class="bar-container"><div id="energy-fill"></div></div>
+</div>
+
+<div id="status-msg"></div>
+<div id="crosshair"></div>
+<div id="instructions"></div>
+<div id="overlay"><div id="msg">MISSION FAILED<br><span style="font-size: 16px;">CLICK TO RETRY</span></div></div>
+
+<script type="importmap">
+    { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+</script>
+
+<script type="module">
+    import * as THREE from 'three';
+    import { PointerLockControls } from 'https://unpkg.com/three@0.160.0/examples/jsm/controls/PointerLockControls.js';
+
+    let mode = null;
+    let isMobile = false;
+    let health = 100, maxHealth = 100, energy = 100, isGameOver = false, hasCleared = false;
+    let isBribed = false, isOnTruck = false, isOnTrain = false;
+    let damagePerShot = 20; 
+    const obstacles = [], guards = [], bullets = [];
+    let goldItem = null, truckItem = null, trainItem = null;
+    
+    let velocityY = 0;
+    const gravity = 0.015;
+    let canJump = true;
+
+    // --- モバイル操作用変数 ---
+    let joystickData = { x: 0, y: 0, active: false, identifier: null };
+    let touchState = { dash: false, jump: false };
+    let lookTouch = { active: false, identifier: null, lastX: 0, lastY: 0 };
+
+    const scene = new THREE.Scene();
+    const northSky = new THREE.Color(0x223344);
+    const daySky = new THREE.Color(0xadd8e6);
+    const southSky = new THREE.Color(0x88ccff);
+    
+    scene.background = northSky;
+    scene.fog = new THREE.Fog(0x223344, 10, 160);
+
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    const controls = new PointerLockControls(camera, document.body);
+
+    // --- スマホ用カメラ回転処理の強化 ---
+    document.addEventListener('touchstart', (e) => {
+        if (!isMobile) return;
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            const t = e.changedTouches[i];
+            // 操作系以外の場所を触れたら視点移動開始
+            if (!t.target.closest('#mobile-controls') && !t.target.closest('#mobile-buttons') && !t.target.closest('#mode-switch')) {
+                if (!lookTouch.active) {
+                    lookTouch.active = true;
+                    lookTouch.identifier = t.identifier;
+                    lookTouch.lastX = t.pageX;
+                    lookTouch.lastY = t.pageY;
+                }
+            }
+        }
+    }, { passive: false });
+
+    document.addEventListener('touchmove', (e) => {
+        if (!isMobile) return;
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            const t = e.changedTouches[i];
+            if (lookTouch.active && t.identifier === lookTouch.identifier) {
+                const movementX = t.pageX - lookTouch.lastX;
+                const movementY = t.pageY - lookTouch.lastY;
+
+                const euler = new THREE.Euler(0, 0, 0, 'YXZ');
+                euler.setFromQuaternion(camera.quaternion);
+                euler.y -= movementX * 0.006;
+                euler.x -= movementY * 0.006;
+                euler.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, euler.x));
+                camera.quaternion.setFromEuler(euler);
+
+                lookTouch.lastX = t.pageX;
+                lookTouch.lastY = t.pageY;
+            }
+        }
+    }, { passive: false });
+
+    document.addEventListener('touchend', (e) => {
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            const t = e.changedTouches[i];
+            if (lookTouch.active && t.identifier === lookTouch.identifier) {
+                lookTouch.active = false;
+                lookTouch.identifier = null;
+            }
+        }
+    });
+
+    const ambLight = new THREE.AmbientLight(0xffffff, 0.6);
+    scene.add(ambLight);
+    const sun = new THREE.DirectionalLight(0xffffff, 1);
+    sun.position.set(30, 50, 20);
+    scene.add(sun);
+
+    // --- モード切替ロジック ---
+    const modeBtn = document.getElementById('mode-switch');
+    modeBtn.onclick = (e) => {
+        e.stopPropagation();
+        isMobile = !isMobile;
+        modeBtn.innerText = isMobile ? "DEVICE: MOBILE" : "DEVICE: PC";
+        const display = isMobile ? 'flex' : 'none';
+        document.getElementById('mobile-controls').style.display = isMobile ? 'block' : 'none';
+        document.getElementById('mobile-buttons').style.display = display;
+        if (!isMobile) controls.lock();
+    };
+
+    // --- ジョイスティック処理 (マルチタッチ対応に修正) ---
+    const joyStick = document.getElementById('mobile-controls');
+    const joyKnob = document.getElementById('joystick');
+    joyStick.addEventListener('touchstart', (e) => { 
+        const t = e.changedTouches[0];
+        joystickData.active = true; 
+        joystickData.identifier = t.identifier;
+    });
+    joyStick.addEventListener('touchmove', (e) => {
+        if (!joystickData.active) return;
+        let t = null;
+        for(let i=0; i<e.touches.length; i++) {
+            if(e.touches[i].identifier === joystickData.identifier) t = e.touches[i];
+        }
+        if(!t) return;
+
+        const rect = joyStick.getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+        let dx = t.pageX - centerX;
+        let dy = t.pageY - centerY;
+        const dist = Math.min(50, Math.sqrt(dx*dx + dy*dy));
+        const angle = Math.atan2(dy, dx);
+        
+        joystickData.x = (Math.cos(angle) * dist) / 50;
+        joystickData.y = (Math.sin(angle) * dist) / 50;
+        
+        joyKnob.style.transform = `translate(${Math.cos(angle) * dist}px, ${Math.sin(angle) * dist}px)`;
+    });
+    joyStick.addEventListener('touchend', (e) => {
+        for(let i=0; i<e.changedTouches.length; i++) {
+            if(e.changedTouches[i].identifier === joystickData.identifier) {
+                joystickData.active = false;
+                joystickData.identifier = null;
+                joystickData.x = 0; joystickData.y = 0;
+                joyKnob.style.transform = `translate(0px, 0px)`;
+            }
+        }
+    });
+
+    // --- スマホボタン処理 ---
+    const btnDash = document.getElementById('btn-dash');
+    const btnJump = document.getElementById('btn-jump');
+    btnDash.addEventListener('touchstart', (e) => { e.preventDefault(); touchState.dash = true; });
+    btnDash.addEventListener('touchend', () => touchState.dash = false);
+    btnJump.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        if (canJump) {
+            velocityY = 0.25;
+            canJump = false;
+        }
+    });
+
+    // --- 既存のゲームオブジェクト生成 (変更なし) ---
+    function createTrainLogo() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 512; canvas.height = 256;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#2c3e50'; ctx.fillRect(0,0,512,256);
+        ctx.strokeStyle = '#f1c40f'; ctx.lineWidth = 10; ctx.strokeRect(20,20,472,216);
+        ctx.fillStyle = '#ecf0f1'; ctx.font = 'bold 60px Arial';
+        ctx.fillText('JSA LOGISTICS', 45, 100);
+        ctx.font = '30px Arial'; ctx.fillStyle = '#f1c40f';
+        ctx.fillText('GLOBAL EXPRESS // UNIT-09', 45, 160);
+        ctx.fillStyle = 'rgba(255,255,255,0.1)';
+        for(let i=0; i<10; i++) ctx.fillRect(Math.random()*512, 0, 2, 256);
+        return new THREE.CanvasTexture(canvas);
+    }
+
+    const railX = 200; 
+    function createRailway() {
+        const railGroup = new THREE.Group();
+        const sleeperGeo = new THREE.BoxGeometry(4, 0.2, 0.5);
+        const sleeperMat = new THREE.MeshStandardMaterial({color: 0x442200});
+        for(let z = -200; z < 200; z += 3) {
+            const s = new THREE.Mesh(sleeperGeo, sleeperMat);
+            s.position.set(railX, 0.1, z);
+            railGroup.add(s);
+        }
+        const ironMat = new THREE.MeshStandardMaterial({color: 0x777777, metalness: 0.8});
+        const r1 = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.3, 400), ironMat);
+        r1.position.set(railX - 1, 0.25, 0);
+        const r2 = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.3, 400), ironMat);
+        r2.position.set(railX + 1, 0.25, 0);
+        railGroup.add(r1, r2);
+        scene.add(railGroup);
+
+        const train = new THREE.Group();
+        const logoTex = createTrainLogo();
+        const matBody = new THREE.MeshStandardMaterial({map: logoTex});
+        const matLoco = new THREE.MeshStandardMaterial({color: 0xcc0000});
+
+        const loco = new THREE.Mesh(new THREE.BoxGeometry(3.6, 4.2, 8), matLoco);
+        loco.position.set(0, 2.6, -6);
+        const engineTop = new THREE.Mesh(new THREE.BoxGeometry(2, 1, 4), matLoco);
+        engineTop.position.set(0, 5, -6);
+        train.add(loco, engineTop);
+
+        const wagon = new THREE.Mesh(new THREE.BoxGeometry(3.6, 4.5, 12), matBody);
+        wagon.position.set(0, 2.75, 5);
+        train.add(wagon);
+
+        const wheelGeo = new THREE.CylinderGeometry(0.6, 0.6, 0.5, 16);
+        const wheelMat = new THREE.MeshStandardMaterial({color: 0x111111});
+        [-8, -4, 2, 8].forEach(zPos => {
+            [-1.8, 1.8].forEach(xPos => {
+                const w = new THREE.Mesh(wheelGeo, wheelMat);
+                w.rotation.z = Math.PI/2; w.position.set(xPos, 0.6, zPos);
+                train.add(w);
+            });
+        });
+
+        train.position.set(railX, 0, 100);
+        scene.add(train);
+        return train;
+    }
+    trainItem = createRailway();
+
+    document.getElementById('normal-btn').onclick = () => startGame('NORMAL');
+    document.getElementById('hard-btn').onclick = () => startGame('HARD');
+
+    function startGame(m) {
+        mode = m;
+        document.getElementById('menu-overlay').style.display = 'none';
+        document.getElementById('game-ui').style.display = 'block';
+        document.getElementById('crosshair').style.display = 'block';
+        document.getElementById('instructions').style.display = 'block';
+        
+        if (mode === 'HARD') {
+            scene.background = daySky;
+            scene.fog.color = daySky;
+            scene.fog.near = 5;
+            scene.fog.far = 150; 
+            ambLight.intensity = 1.1;
+            document.getElementById('instructions').innerText = "注意：超高速弾が飛んできます！";
+            if(goldItem) scene.remove(goldItem);
+            if(truckItem) scene.remove(truckItem);
+        } else {
+            document.getElementById('instructions').innerText = "FIND THE MONEY BAG / TRUCK BEHIND YOU / TRAIN FAR RIGHT";
+            document.getElementById('status-msg').innerText = "SEARCH THE BLACK BAG UNDER TREES";
+        }
+        
+        if(!isMobile) controls.lock();
+        animate();
+    }
+
+    function explode(pos) {
+        const flash = document.getElementById('flash');
+        flash.style.opacity = "1";
+        const particles = new THREE.Group();
+        const geo = new THREE.SphereGeometry(0.3, 4, 4);
+        const mat = new THREE.MeshBasicMaterial({color: 0xff4400});
+        for(let i=0; i<60; i++) {
+            const p = new THREE.Mesh(geo, mat);
+            p.position.set((Math.random()-0.5)*10, Math.random()*8, (Math.random()-0.5)*10);
+            particles.add(p);
+        }
+        particles.position.copy(pos);
+        scene.add(particles);
+        camera.position.y += 2;
+        camera.rotation.z += 0.2;
+        let op = 1;
+        const fade = setInterval(() => {
+            op -= 0.05;
+            flash.style.opacity = op;
+            if(op <= 0) clearInterval(fade);
+        }, 30);
+    }
+
+    const grass = new THREE.Mesh(new THREE.PlaneGeometry(3000, 3000), new THREE.MeshStandardMaterial({ color: 0x15200a }));
+    grass.rotation.x = -Math.PI / 2;
+    scene.add(grass);
+    
+    const road = new THREE.Mesh(new THREE.PlaneGeometry(14, 500), new THREE.MeshStandardMaterial({ color: 0x222222 }));
+    road.rotation.x = -Math.PI / 2; road.position.y = 0.01; road.position.z = 50;
+    scene.add(road);
+
+    const parking = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.MeshStandardMaterial({ color: 0x333333 }));
+    parking.rotation.x = -Math.PI / 2; parking.position.set(0, 0.02, 160);
+    scene.add(parking);
+
+    function createDetailedTruck(x, z) {
+        const truck = new THREE.Group();
+        const matBody = new THREE.MeshStandardMaterial({color: 0x2a3d2a});
+        const matCab = new THREE.MeshStandardMaterial({color: 0x1a2d1a});
+        const matGlass = new THREE.MeshStandardMaterial({color: 0x88ccff, transparent: true, opacity: 0.6});
+        const matTire = new THREE.MeshStandardMaterial({color: 0x111111});
+        const bed = new THREE.Mesh(new THREE.BoxGeometry(4.2, 1.2, 6), matBody);
+        bed.position.y = 1.3; bed.position.z = 1.5;
+        const cab = new THREE.Mesh(new THREE.BoxGeometry(4, 2.2, 2.5), matCab);
+        cab.position.y = 1.8; cab.position.z = -2.5;
+        const glass = new THREE.Mesh(new THREE.BoxGeometry(3.6, 1.0, 0.1), matGlass);
+        glass.position.set(0, 2.3, -3.76);
+        const tireGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.5, 16);
+        const tires = [[-2, 0.5, -2], [2, 0.5, -2], [-2, 0.5, 3], [2, 0.5, 3]];
+        tires.forEach(p => {
+            const t = new THREE.Mesh(tireGeo, matTire);
+            t.rotation.z = Math.PI/2; t.position.set(...p);
+            truck.add(t);
+        });
+        truck.add(bed, cab, glass);
+        truck.position.set(x, 0, z);
+        scene.add(truck);
+        return truck;
+    }
+    truckItem = createDetailedTruck(0, 160);
+
+    function createMoneyBag() {
+        const group = new THREE.Group();
+        const bag = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.8, 0.7), new THREE.MeshStandardMaterial({ color: 0x111111 }));
+        const money = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.2, 0.4), new THREE.MeshStandardMaterial({ color: 0x228b22 }));
+        money.position.set(0.3, 0.4, 0);
+        const handle = new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.05, 8, 16, Math.PI), new THREE.MeshStandardMaterial({ color: 0x111111 }));
+        handle.position.set(0, 0.4, 0);
+        group.add(bag, money, handle);
+        const randomSide = Math.random() > 0.5 ? 15 : -15;
+        const randomZ = 20 + Math.floor(Math.random() * 5) * 15;
+        group.position.set(randomSide, 0.4, randomZ);
+        scene.add(group);
+        return group;
+    }
+    goldItem = createMoneyBag();
+
+    function createFlag(type, x, z) {
+        const group = new THREE.Group();
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 8), new THREE.MeshStandardMaterial({color: 0xaaaaaa}));
+        const cloth = new THREE.Mesh(new THREE.BoxGeometry(4.5, 3, 0.1), new THREE.MeshStandardMaterial({ map: generateDetailedFlag(type) }));
+        cloth.position.set(2.25, 3, 0);
+        group.add(pole, cloth); group.position.set(x, 4, z);
+        scene.add(group);
+    }
+    createFlag('NORTH', 5, 80); createFlag('KOREA', 0, -60);
+    function generateDetailedFlag(type) {
+        const canvas = document.createElement('canvas'); canvas.width = 600; canvas.height = 400;
+        const ctx = canvas.getContext('2d');
+        if (type === 'KOREA') {
+            ctx.fillStyle = '#ffffff'; ctx.fillRect(0,0,600,400);
+            const cx=300, cy=200, r=100;
+            ctx.fillStyle = '#cd2e3a'; ctx.beginPath(); ctx.arc(cx,cy,r,Math.PI*1.15, Math.PI*0.15); ctx.fill();
+            ctx.fillStyle = '#0047a0'; ctx.beginPath(); ctx.arc(cx,cy,r,Math.PI*0.15, Math.PI*1.15); ctx.fill();
+        } else {
+            ctx.fillStyle = '#0038a8'; ctx.fillRect(0,0,600,400);
+            ctx.fillStyle = '#fff'; ctx.fillRect(0,65,600,270);
+            ctx.fillStyle = '#ed1c24'; ctx.fillRect(0,75,600,250);
+        }
+        return new THREE.CanvasTexture(canvas);
+    }
+
+    const borderZ = -15;
+    function createFence(x, w) {
+        const f = new THREE.Mesh(new THREE.BoxGeometry(w, 3, 0.2), new THREE.MeshStandardMaterial({ color: 0x444444, wireframe: true }));
+        const g = new THREE.Mesh(new THREE.BoxGeometry(w, 0.1, 0.3), new THREE.MeshBasicMaterial({ color: 0xff0000 }));
+        f.position.set(x, 1.5, borderZ); g.position.set(x, 2.5, borderZ);
+        scene.add(f, g);
+    }
+    createFence(-30, 46); createFence(30, 46);
+
+    for(let i=0; i<10; i++) {
+        const trunk = new THREE.Mesh(new THREE.BoxGeometry(1.5, 5, 1.5), new THREE.MeshStandardMaterial({color: 0x20150a}));
+        trunk.position.set(i%2?15:-15, 2.5, 80-i*15); scene.add(trunk); obstacles.push(trunk);
+        const leaves = new THREE.Mesh(new THREE.BoxGeometry(4, 4, 4), new THREE.MeshStandardMaterial({color: 0x0a1a0a}));
+        leaves.position.set(i%2?15:-15, 6, 80-i*15); scene.add(leaves);
+    }
+
+    function createGuard(x, z) {
+        const g = new THREE.Group();
+        const body = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.2, 0.4), new THREE.MeshStandardMaterial({color: 0x1a241a}));
+        body.position.y = 1;
+        const head = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.4), new THREE.MeshStandardMaterial({color: 0x443322}));
+        head.position.y = 1.7;
+        g.add(body, head); g.position.set(x, 0, z);
+        scene.add(g); guards.push({ obj: g, lastShot: 0 });
+    }
+    createGuard(-3.5, -8); createGuard(3.5, -8);
+
+    const b1 = new THREE.Mesh(new THREE.BoxGeometry(8, 4, 15), new THREE.MeshStandardMaterial({ color: 0x2288ff }));
+    b1.position.set(-11, 2, -8); scene.add(b1); obstacles.push(b1);
+    const b2 = new THREE.Mesh(new THREE.BoxGeometry(8, 4, 15), new THREE.MeshStandardMaterial({ color: 0x2288ff }));
+    b2.position.set(11, 2, -8); scene.add(b2); obstacles.push(b2);
+
+    const keys = {};
+    document.addEventListener('keydown', e => {
+        keys[e.code] = true;
+        if (e.code === 'Space' && canJump && !hasCleared) {
+            velocityY = 0.25; canJump = false;
+        }
+    });
+    document.addEventListener('keyup', e => keys[e.code] = false);
+    camera.position.set(0, 1.7, 100);
+
+    // --- メインループ ---
+    function animate() {
+        if (isGameOver) return;
+        requestAnimationFrame(animate);
+
+        const playerPos = camera.position;
+
+        if (controls.isLocked || isMobile) {
+            let baseSpeed = (isOnTruck || isOnTrain) ? 0.4 : 0.15;
+            
+            const isDashing = keys['Space'] || touchState.dash;
+
+            if (hasCleared) {
+                if (isDashing) {
+                    velocityY += 0.02;
+                    if (velocityY > 0.4) velocityY = 0.4;
+                    canJump = false;
+                }
+            } else {
+                let speedMult = (isDashing && energy > 0) ? 2.5 : 1.0;
+                baseSpeed *= speedMult;
+                if (isDashing && energy > 0) energy -= 1.0; else if (energy < 100) energy += 0.4;
+            }
+
+            document.getElementById('energy-fill').style.width = energy + "%";
+            
+            if (!isOnTrain) {
+                // PC移動
+                if (keys['KeyW']) controls.moveForward(baseSpeed);
+                if (keys['KeyS']) controls.moveForward(-baseSpeed);
+                if (keys['KeyA']) controls.moveRight(-baseSpeed);
+                if (keys['KeyD']) controls.moveRight(baseSpeed);
+
+                // モバイル移動 (ジョイスティック)
+                if (isMobile && joystickData.active) {
+                    controls.moveForward(-joystickData.y * baseSpeed);
+                    controls.moveRight(joystickData.x * baseSpeed);
+                }
+            }
+
+            playerPos.y += velocityY;
+            velocityY -= gravity;
+            const groundY = isOnTruck ? 3.2 : 1.7;
+            if (playerPos.y < groundY) {
+                playerPos.y = groundY;
+                velocityY = 0;
+                canJump = true;
+            }
+        }
+
+        // --- 弾丸の更新処理 ---
+        for (let i = bullets.length - 1; i >= 0; i--) {
+            const b = bullets[i];
+            b.mesh.position.add(b.velocity);
+            b.dist += b.velocity.length();
+
+            if (b.mesh.position.distanceTo(playerPos) < 1.5) {
+                health -= (isOnTruck ? 8 : damagePerShot);
+                scene.remove(b.mesh);
+                bullets.splice(i, 1);
+                if (health <= 0) { health = 0; explode(playerPos); die("ELIMINATED"); }
+                continue;
+            }
+            if (b.dist > 150) {
+                scene.remove(b.mesh);
+                bullets.splice(i, 1);
+            }
+        }
+
+        if (!isOnTrain && trainItem && playerPos.distanceTo(trainItem.position) < 10) {
+            isOnTrain = true;
+            document.getElementById('status-msg').innerText = "ESCAPE TRAIN ACTIVATED";
+            document.getElementById('status-msg').style.color = "#0f0";
+        }
+
+        if (isOnTrain) {
+            trainItem.position.z -= 0.6; 
+            camera.position.x = trainItem.position.x;
+            camera.position.z = trainItem.position.z + 5;
+            if (trainItem.position.z < -70) win();
+        }
+
+        if (mode === 'NORMAL') {
+            if (!isBribed && goldItem && playerPos.distanceTo(goldItem.position) < 3.5) {
+                isBribed = true; scene.remove(goldItem);
+                document.getElementById('status-msg').innerText = "BRIBE SUCCESS";
+            }
+            if (!isOnTruck && truckItem && playerPos.distanceTo(truckItem.position) < 5) {
+                isOnTruck = true; scene.remove(truckItem);
+                maxHealth = 600; health = 600; 
+                document.getElementById('status-msg').innerText = "TRUCK ACTIVE";
+                document.getElementById('health-fill').style.backgroundColor = "#0f0";
+            }
+        }
+        document.getElementById('health-fill').style.width = (health / maxHealth * 100) + "%";
+
+        if (playerPos.z < borderZ || mode === 'HARD') { 
+            scene.background = southSky; scene.fog.color = southSky; ambLight.intensity = 1.1; 
+        } else { 
+            scene.background = northSky; scene.fog.color = northSky; ambLight.intensity = 0.6; 
+        }
+
+        if (!hasCleared) {
+            if (!isOnTrain && Math.abs(playerPos.z - borderZ) < 1.0 && Math.abs(playerPos.x) > 7 && Math.abs(playerPos.x - railX) > 5) die("ELECTROCUTED");
+            if (!isOnTrain && playerPos.z < -60) win();
+
+            const now = Date.now();
+            if (playerPos.z > borderZ && !isBribed && !isOnTrain) {
+                guards.forEach(g => {
+                    g.obj.lookAt(playerPos.x, 1, playerPos.z);
+                    const dist = g.obj.position.distanceTo(playerPos);
+                    const range = (mode === 'HARD') ? 100 : 45;
+                    const shotCooldown = (mode === 'HARD') ? 400 : 1500;
+
+                    if (dist < range && now - g.lastShot > shotCooldown) {
+                        const bGeo = new THREE.SphereGeometry(0.2, 8, 8);
+                        const bMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+                        const bMesh = new THREE.Mesh(bGeo, bMat);
+                        bMesh.position.set(g.obj.position.x, 1.5, g.obj.position.z);
+                        const bSpeed = (mode === 'HARD') ? 1.5 : 0.4;
+                        const bDir = new THREE.Vector3().subVectors(playerPos, bMesh.position).normalize();
+                        const bVel = bDir.multiplyScalar(bSpeed);
+                        scene.add(bMesh);
+                        bullets.push({ mesh: bMesh, velocity: bVel, dist: 0 });
+                        g.lastShot = now;
+                    }
+                });
+            }
+        }
+        renderer.render(scene, camera);
+    }
+
+    function die(m) { isGameOver = true; showEnd(m, "#f00"); }
+    function win() { 
+        if (hasCleared) return;
+        hasCleared = true; 
+        document.getElementById('energy-label').innerText = "POWER: HOLD DASH TO FLY";
+        document.getElementById('health-fill').style.width = "100%";
+        document.getElementById('health-fill').style.backgroundColor = "#fff";
+        showEnd("MISSION COMPLETE<br>GOD MODE: DASH TO FLY", "#0f0"); 
+    }
+
+    function showEnd(t, c) {
+        const el = document.getElementById('msg');
+        el.innerHTML = t + '<br><span style="font-size: 16px;">CLICK TO RETRY / KEEP MOVING</span>';
+        el.style.display = "block"; el.style.borderColor = c;
+        if (isGameOver) controls.unlock();
+    }
+    window.addEventListener('mousedown', () => { 
+        if(isGameOver) location.reload(); 
+        if(hasCleared) document.getElementById('msg').style.display = "none";
+    });
+</script>
+</body>
+</html>
